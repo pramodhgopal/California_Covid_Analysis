@@ -20,13 +20,16 @@ Graph of cases and deaths in the state of California through the last year now a
 
 
 
-Model prediction for deaths per thousand by cases by thousand
+
+
+
+Model prediction for deaths per thousand by cases by thousand for all the counties in California
 
 ![image](https://user-images.githubusercontent.com/20074613/129069612-6a4907c9-dc4e-4797-94ca-cded5e1f53dd.png)
 
 
 
-Please view the Rmd for conclusion.  
+Please view the Rmd for conclusion analysis.  
 
 
 
