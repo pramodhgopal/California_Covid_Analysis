@@ -1,0 +1,111 @@
+---
+title: "COVID 19 Report"
+author: "P.Gopal"
+date: "7/29/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Analysis of Covid 19 in the State of California
+
+This document contains a brief analysis of the data from the COVID-19 data set from the Johns Hopkins github site. The intention is to provide an exploratory data analysis in a reproducible manner to ensure the validity of said analysis. In this document we shall import the data and try to analyse the number of cases and deaths in the state of California. Finally we will try to model the deaths by cases and see if they are linearly related.
+
+Lets start by importing the relevant data sets from the github site. This github site provides data on covid cases and deaths for the US and the world. We will be importing the US cases and deaths data set and modifying them to see how California fared during this pandemic.
+
+```{r get_jhu_data, message=FALSE, warning=FALSE}
+library(stringr)
+## Get current data in the four files
+url_in <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/"
+filenames <- c("time_series_covid19_confirmed_US.csv", "time_series_covid19_confirmed_global.csv", "time_series_covid19_deaths_US.csv", "time_series_covid19_deaths_global.csv")
+
+uid_lookup_url <- "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv"
+
+urls <- str_c(url_in, filenames)
+```
+
+Lets read in the data sets. We will only need the US related data set for the number of cases and deaths.
+
+```{r import_data, message=FALSE, warning=FALSE}
+library(readr)
+library(dplyr)
+# Read only the data sets related to the US
+US_cases <- read_csv(urls[1])
+US_deaths <- read_csv(urls[3])
+
+uid <- read_csv(uid_lookup_url) %>% select(-c(Lat, Long_, Combined_Key, code3, iso2, iso3, Admin2))
+```
+
+Let's tidy the data by joining the two data sets together in order to plot them.
+
+```{r tidy_data, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+# Pivot the tables so we dont have a column for every date and convert the date column to date format
+US_cases <- US_cases %>% pivot_longer(cols = -(UID:Combined_Key), names_to ="date", values_to = "cases") %>% select(Admin2:cases) %>% mutate(date = mdy(date)) %>% select(-c(Lat, Long_))
+
+US_deaths <- US_deaths %>% pivot_longer(cols = -(UID:Population), names_to ="date", values_to = "deaths") %>% select(Admin2:deaths) %>% mutate(date = mdy(date)) %>% select(-c(Lat, Long_))
+
+US <- US_cases %>% full_join(US_deaths)
+
+```
+
+Now that the data is tidied, lets select California from the US data set and plot a graph that shows the number of cases as well as the number of deaths over time. This helps us visualize the rise of Covid in California.
+
+```{r visualize_the_data, message=FALSE, warning=FALSE}
+library(ggplot2)
+# Groups by state, country and date. Adds new column deaths per million
+US_by_state <- US %>% group_by(Province_State, Country_Region, date) %>% summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>% mutate(deaths_per_mill = deaths * 1000000 / Population) %>% select(Province_State, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>% ungroup()
+
+# Groups by County, State, country and date. Adds the same column as above. This will be used later
+county_totals <- US %>% group_by(Admin2, Province_State, Country_Region, date) %>% summarize(cases = sum(cases), deaths = sum(deaths), Population = sum(Population)) %>% mutate(deaths_per_mill = deaths * 1000000 / Population) %>% select(Admin2, Country_Region, Country_Region, date, cases, deaths, deaths_per_mill, Population) %>% ungroup()
+
+# Since we are interested in the state of California, filter the data set by the state and plot the graphs using cases and deaths with time on the x axis and the number of cases/deaths on the y axis
+state <- "California"
+US_by_state %>% filter(Province_State == state) %>% filter(cases>0) %>% ggplot(aes(x=date, y=cases)) + geom_line(aes(color="cases")) + geom_point(aes(color="cases")) + geom_line(aes(y=deaths, color="deaths")) + geom_point(aes(y=deaths, color="deaths")) + scale_y_log10() + theme(legend.position="bottom", axis.text.x= element_text(angle=90)) + labs(title = str_c("Covid19 - State of ", state ), y =NULL)
+
+```
+
+
+The graph shows that California has seemingly flattened the curve. How can we be sure? Lets add some new columns to our data set and see. Here we will account for the lag of cases and new deaths. We will call these columns new_cases and new_deaths. This will help us visualize bigger spikes in the graph, if there are any due to a sudden increase in cases or deaths after some time of neither.
+
+
+```{r second_plot, message=FALSE, warning=FALSE}
+# Add new columns new_cases and new_deaths
+US_by_state <- US_by_state %>% mutate(new_cases = cases - lag(cases), new_deaths = deaths - lag(deaths)) 
+
+# Plot the new graph for California now accounted for lag
+US_by_state %>% filter(Province_State == state) %>% filter(cases>0) %>% ggplot(aes(x=date, y=new_cases)) + geom_line(aes(color="new_cases")) + geom_point(aes(color="new_cases")) + geom_line(aes(y=new_deaths, color="new_deaths")) + geom_point(aes(y=new_deaths, color="new_deaths")) + scale_y_log10() + theme(legend.position="bottom", axis.text.x= element_text(angle=90)) + labs(title = str_c("Covid19 - State of ", state , " (accounted for lag)"), y =NULL)
+```
+
+
+Here we can see that the graph is not quite flat anymore. This shows that the pattern for California now resembles a wave.There was a dip in the number of cases and deaths around September/October of 2020 and the cases started rising again during the holiday season and into the new years. It had started decreasing from then before starting to increase again since the last month.
+
+
+Now that we have visualized the covid data for California, lets try and see if there is any relation with the deaths and cases in California. We will use the the deaths per thousand and cases per thousand columns in a new cal_totals data frame that we can create by grouping the various counties of California together and see if they are linearly related. We will use that equation to predict a new column and see how it compares with the original deaths_per_thou column.
+
+```{r}
+# Group together the counties just for the State of California. This will gives us a better view of how the state fared.
+cal_totals <- county_totals %>% filter(Province_State == state) %>% group_by(Admin2) %>% summarize(deaths=max(deaths), cases=max(cases), population=max(Population), cases_per_thou=1000*cases/population, deaths_per_thou=1000*deaths/population) %>% filter(cases>0, population >0)
+
+# Try to establish a linear model between deaths_per_thou and cases_per_thou
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = cal_totals)
+# Add a new column where we predict the death_per_thou using the model from above
+cal_tot_w_pred <- cal_totals %>% mutate(pred = predict(mod))
+
+# Plot the graph of both points to analyze
+cal_tot_w_pred %>% ggplot() + geom_point(aes(x=cases_per_thou, y=deaths_per_thou), color = "blue") + geom_point(aes(x=cases_per_thou, y=pred), color = "red")  + labs(title = str_c("Model prediction - Counties of ", state ))
+```
+
+# Conclusion - Analysis and highlighting biases
+
+From this data analysis, we can conclude that the curve for California has not been flattened as we originally hoped. The second visualization paints a much better picture. As mentioned above, instead of flattening at the top, the graph resembles a wave with its ups and downs.There was a dip in the number of cases and deaths around September/October of 2020 and both of them started rising again during the holiday season and into the new year. My guess would be people had started gathering in groups again during Thanksgiving and new years and this contributed the rise in cases and deaths. This was followed by a gradual decrease in the first half of 2021. Most likely this can be explained to the vaccine roll out during this time and as a result caused the cases and deaths to drop. I would like to highlight the rise in cases and deaths again during the beginning of July 2021. I would hazard a guess that this is due to the new delta variant that is said to be a more contagious strain and is seriously affecting the unvaccinated among the populace.
+
+As for the model prediction of deaths by cases by the thousands, I only took into account the various counties in California. We can see most of the actual deaths per thousand by county are clustered pretty close to the predicted linear model. There are two edge cases, one with high deaths per thousand and the other with high cases by thousands. These two cases are really far apart from their predicted points. Looking into the data set cal_tot_w_pred and sorting by deaths_per_thou and cases_per_thou, we can see the affected counties are Imperial County(high death per thousand) and Lassen County(high cases per thousand).
+
+This exploratory data analysis into covid in California raises some interesting questions, particularly form the model prediction. Why was Imperial County hit harder with deaths from covid compared to the rest of the Counties in California? Was it due to a lack of facilities or emergency rooms? What was the economy like in this county? Did it have more blue collar workers required to show up to work and not have the luxury of working from home?
+Why did Lassen county have such a higher number of cases per thousand but not deaths? Were there other external variables that could have been in play? How many of these variables, if any, were shared between Imperial and Lassen Counties?
+
+These questions could definitely benefit by further looking into some external data such as main economic sources, number of hospitals with ER in the counties, maybe political affiliation. I am inclined to highlight my bias that I'm currently residing in California and have been for the past 14 years. This is the main reason that I wanted to explore this State's data specifically. The assumptions that I made in the first paragraph about the rise and dips in cases were due to news articles that I have been following that indicated the rise in covid cases in California. This applies for the delta variant assumption too. I have read that its been mostly affecting the unvaccinated, which is why I made that assumption. Even my exploratory questions about the situation in Imperial county is biased. I have personally driven through the area and know that it is one of the poorest counties in the State. This has affected the type of questions that I asked when I noticed it as an edge case in the prediction plot.  
