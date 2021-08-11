@@ -5,6 +5,18 @@ The rmd document contains a brief analysis of the data from the COVID-19 data se
 
 Please use RStudio to knit the rmd document to reproduce the report.
 
+## Data Source
+
+CSV files - https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/
+
+
+
+## Methods
+
+I used RStudio to read in the data from the CSV, cleaned it and plotted the graphs using Tideyverse's ggplot. Tried establishing a relationship between 2 new columns: cases_per_thou and deaths_per_thou and tried to build a model to predict a linear relationship between them. Detailed analysis of the graphs and model can be found in the RMD document.
+
+
+
 ## Findings
 
 
